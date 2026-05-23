@@ -1,0 +1,58 @@
+name: Email Cleanup
+
+# Triggered by the CF Worker when a user runs /email-cleanup <accountId> <timeframe>
+on:
+  workflow_dispatch:
+    inputs:
+      account_id:
+        description: 'Account ID (e.g. 1)'
+        required: true
+        type: string
+      timeframe:
+        description: 'Timeframe to clean (e.g. 7d, 24h, 2026-05-01)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Dry run — categorise without deleting/archiving'
+        required: false
+        default: 'false'
+        type: string
+
+jobs:
+  cleanup:
+    name: Cleanup account ${{ inputs.account_id }} (${{ inputs.timeframe }}${{ inputs.dry_run == 'true' && ' dry-run' || '' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set account credentials
+        run: |
+          echo "ACCOUNT_${{ inputs.account_id }}_GMAIL_CLIENT_ID=${{ secrets[format('ACCOUNT_{0}_GMAIL_CLIENT_ID', inputs.account_id)] }}" >> $GITHUB_ENV
+          echo "ACCOUNT_${{ inputs.account_id }}_GMAIL_CLIENT_SECRET=${{ secrets[format('ACCOUNT_{0}_GMAIL_CLIENT_SECRET', inputs.account_id)] }}" >> $GITHUB_ENV
+          echo "ACCOUNT_${{ inputs.account_id }}_GMAIL_ACCESS_TOKEN=${{ secrets[format('ACCOUNT_{0}_GMAIL_ACCESS_TOKEN', inputs.account_id)] }}" >> $GITHUB_ENV
+          echo "ACCOUNT_${{ inputs.account_id }}_GMAIL_REFRESH_TOKEN=${{ secrets[format('ACCOUNT_{0}_GMAIL_REFRESH_TOKEN', inputs.account_id)] }}" >> $GITHUB_ENV
+          echo "ACCOUNT_${{ inputs.account_id }}_EMAIL=${{ secrets[format('ACCOUNT_{0}_EMAIL', inputs.account_id)] }}" >> $GITHUB_ENV
+          echo "ACCOUNT_${{ inputs.account_id }}_SLACK_CHANNEL_ID=${{ secrets[format('ACCOUNT_{0}_SLACK_CHANNEL_ID', inputs.account_id)] }}" >> $GITHUB_ENV
+
+      - name: Run cleanup
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          MAX_EMAILS_PER_CLEANUP: '500'
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          node index.js cleanup ${{ inputs.account_id }} "${{ inputs.timeframe }}" $DRY_RUN_FLAG

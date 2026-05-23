@@ -1,0 +1,107 @@
+name: Email Check
+
+on:
+  schedule:
+    # Run every 3 hours: 00:00, 03:00, 06:00 ... UTC
+    - cron: '0 0,3,6,9,12,15,18,21 * * *'
+  workflow_dispatch:
+    inputs:
+      account_id:
+        description: 'Account ID to check (leave blank to check all accounts)'
+        required: false
+        type: string
+        default: ''
+      from_timeframe:
+        description: 'Check from this point in time — e.g. 24h, 7d, 2026-05-20 (leave blank to use last checkpoint)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  # ── Step 1: Read accounts.json and produce the matrix ─────────────────────
+  prepare:
+    name: Prepare account matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build account matrix from accounts.json
+        id: build-matrix
+        run: |
+          if [ -n "${{ inputs.account_id }}" ]; then
+            MATRIX="[${{ inputs.account_id }}]"
+          else
+            MATRIX=$(cat accounts.json | jq -c '.accounts | map(.id)')
+          fi
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "Accounts to process: $MATRIX"
+
+  # ── Step 2: Run one job per account (parallel) ────────────────────────────
+  check-emails:
+    name: Check emails (account ${{ matrix.account }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Each account runs independently; one failure does NOT block others
+    continue-on-error: true
+    strategy:
+      matrix:
+        account: ${{ fromJson(needs.prepare.outputs.matrix) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Need write access to commit the updated state file
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Restore state file for account ${{ matrix.account }}
+        continue-on-error: true
+        run: |
+          git fetch origin main --depth=1 || true
+          git checkout origin/main -- ".last-email-check-account-${{ matrix.account }}.json" 2>/dev/null || true
+
+      - name: Set account credentials
+        run: |
+          echo "ACCOUNT_${{ matrix.account }}_GMAIL_CLIENT_ID=${{ secrets[format('ACCOUNT_{0}_GMAIL_CLIENT_ID', matrix.account)] }}" >> $GITHUB_ENV
+          echo "ACCOUNT_${{ matrix.account }}_GMAIL_CLIENT_SECRET=${{ secrets[format('ACCOUNT_{0}_GMAIL_CLIENT_SECRET', matrix.account)] }}" >> $GITHUB_ENV
+          echo "ACCOUNT_${{ matrix.account }}_GMAIL_ACCESS_TOKEN=${{ secrets[format('ACCOUNT_{0}_GMAIL_ACCESS_TOKEN', matrix.account)] }}" >> $GITHUB_ENV
+          echo "ACCOUNT_${{ matrix.account }}_GMAIL_REFRESH_TOKEN=${{ secrets[format('ACCOUNT_{0}_GMAIL_REFRESH_TOKEN', matrix.account)] }}" >> $GITHUB_ENV
+          echo "ACCOUNT_${{ matrix.account }}_EMAIL=${{ secrets[format('ACCOUNT_{0}_EMAIL', matrix.account)] }}" >> $GITHUB_ENV
+          echo "ACCOUNT_${{ matrix.account }}_SLACK_CHANNEL_ID=${{ secrets[format('ACCOUNT_{0}_SLACK_CHANNEL_ID', matrix.account)] }}" >> $GITHUB_ENV
+
+      - name: Check emails for account ${{ matrix.account }}
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
+          # Buttons are handled by the CF Worker — enable them so GHA posts interactive messages
+          ENABLE_INTERACTIVE_BUTTONS: 'true'
+          SUMMARIZER_ENGINE: 'natural'
+        run: |
+          FROM_FLAG=""
+          if [ -n "${{ inputs.from_timeframe }}" ]; then
+            FROM_FLAG="--from ${{ inputs.from_timeframe }}"
+          fi
+          node index.js check-account ${{ matrix.account }} $FROM_FLAG
+
+      - name: Commit updated state file for account ${{ matrix.account }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ".last-email-check-account-${{ matrix.account }}.json" || true
+          git diff --cached --quiet || \
+            git commit -m "chore: update email state for account ${{ matrix.account }} [skip ci]"
+          git push || true

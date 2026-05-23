@@ -1,0 +1,60 @@
+name: Email State Reset
+
+# Triggered by the CF Worker when a user runs /email-reset <accountId> <timeframe>
+on:
+  workflow_dispatch:
+    inputs:
+      account_id:
+        description: 'Account ID (e.g. 1)'
+        required: true
+        type: string
+      timeframe:
+        description: 'New checkpoint date (e.g. 24h, 7d, 2026-05-01)'
+        required: true
+        type: string
+
+jobs:
+  state-reset:
+    name: Reset state for account ${{ inputs.account_id }} to ${{ inputs.timeframe }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write   # needed to commit updated state file
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set account credentials
+        run: |
+          echo "ACCOUNT_${{ inputs.account_id }}_GMAIL_CLIENT_ID=${{ secrets[format('ACCOUNT_{0}_GMAIL_CLIENT_ID', inputs.account_id)] }}" >> $GITHUB_ENV
+          echo "ACCOUNT_${{ inputs.account_id }}_GMAIL_CLIENT_SECRET=${{ secrets[format('ACCOUNT_{0}_GMAIL_CLIENT_SECRET', inputs.account_id)] }}" >> $GITHUB_ENV
+          echo "ACCOUNT_${{ inputs.account_id }}_GMAIL_ACCESS_TOKEN=${{ secrets[format('ACCOUNT_{0}_GMAIL_ACCESS_TOKEN', inputs.account_id)] }}" >> $GITHUB_ENV
+          echo "ACCOUNT_${{ inputs.account_id }}_GMAIL_REFRESH_TOKEN=${{ secrets[format('ACCOUNT_{0}_GMAIL_REFRESH_TOKEN', inputs.account_id)] }}" >> $GITHUB_ENV
+          echo "ACCOUNT_${{ inputs.account_id }}_EMAIL=${{ secrets[format('ACCOUNT_{0}_EMAIL', inputs.account_id)] }}" >> $GITHUB_ENV
+          echo "ACCOUNT_${{ inputs.account_id }}_SLACK_CHANNEL_ID=${{ secrets[format('ACCOUNT_{0}_SLACK_CHANNEL_ID', inputs.account_id)] }}" >> $GITHUB_ENV
+
+      - name: Reset email state
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: node index.js reset-state ${{ inputs.account_id }} "${{ inputs.timeframe }}"
+
+      - name: Commit updated state file
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ".last-email-check-account-${{ inputs.account_id }}.json" || true
+          git diff --cached --quiet || \
+            git commit -m "chore: reset email state for account ${{ inputs.account_id }} to ${{ inputs.timeframe }} [skip ci]"
+          git push || true

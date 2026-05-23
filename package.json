@@ -1,0 +1,59 @@
+{
+  "name": "email-manager-agent",
+  "version": "1.0.0",
+  "description": "Email management agent for Gmail and Slack integration",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "server": "node server.js",
+    "check-emails": "node index.js check",
+    "check-all": "node index.js check-all",
+    "delete-email": "node index.js delete",
+    "dev": "nodemon index.js",
+    "test": "jest",
+    "test:unit": "jest --testPathPattern=test/",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:gmail": "node scripts/test-gmail.js",
+    "test:slack": "node scripts/test-slack.js",
+    "test:integration": "node scripts/test-email-to-slack.js",
+    "batch:cleanup": "node scripts/batch-cleanup-emails.js",
+    "worker:dev": "wrangler dev",
+    "worker:deploy": "wrangler deploy",
+    "worker:tail": "wrangler tail",
+    "worker:secrets:list": "wrangler secret list"
+  },
+  "keywords": [
+    "email",
+    "slack",
+    "gmail",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "~1.6.0",
+    "dotenv": "~16.0.0",
+    "express": "~4.18.0",
+    "googleapis": "~118.0.0",
+    "ollama": "~0.6.3"
+  },
+  "devDependencies": {
+    "jest": "~29.0.0",
+    "nodemon": "~3.0.0",
+    "wrangler": "^3.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/test/**/*.test.js"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "!src/**/*.d.js"
+    ]
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

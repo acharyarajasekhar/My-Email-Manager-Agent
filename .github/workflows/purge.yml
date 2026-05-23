@@ -1,0 +1,120 @@
+name: purge
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel_id:
+        description: 'Slack channel ID to purge'
+        required: true
+        type: string
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Purge Slack channel
+        id: purge_step
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          CHANNEL_ID: ${{ inputs.channel_id }}
+        run: |
+          node - <<'EOF'
+          const fs = require('fs');
+          const https = require('https');
+          
+          function req(method, url, body, token) {
+            return new Promise((resolve, reject) => {
+              const u = new URL(url);
+              const opts = {
+                hostname: u.hostname,
+                path: u.pathname + u.search,
+                method,
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                  'User-Agent': 'email-manager-purge/1.0'
+                }
+              };
+              const h = https.request(opts, (res) => {
+                let data = '';
+                res.on('data', (chunk) => data += chunk);
+                res.on('end', () => resolve(JSON.parse(data)));
+              });
+              h.on('error', reject);
+              if (body) h.write(JSON.stringify(body));
+              h.end();
+            });
+          }
+          
+          async function purge() {
+            const token = process.env.SLACK_BOT_TOKEN;
+            const channelId = process.env.CHANNEL_ID;
+            let cursor = '';
+            let totalDeleted = 0;
+            let totalSkipped = 0;
+            
+            console.log(`🗑️  Purging channel ${channelId}…`);
+            
+            while (true) {
+              const url = `https://slack.com/api/conversations.history?channel=${encodeURIComponent(channelId)}&limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+              console.log(`📖 Fetching messages (cursor: ${cursor || 'start'})`);
+              const hist = await req('GET', url, null, token);
+              
+              if (!hist.ok) {
+                console.error(`❌ conversations.history failed: ${hist.error}`);
+                process.exit(1);
+              }
+              
+              const messages = hist.messages || [];
+              console.log(`   Found ${messages.length} message(s)`);
+              
+              for (const msg of messages) {
+                const delResp = await req('POST', 'https://slack.com/api/chat.delete', { channel: channelId, ts: msg.ts }, token);
+                if (delResp.ok) {
+                  totalDeleted++;
+                } else {
+                  totalSkipped++;
+                  console.log(`   ⊘ Skip msg ${msg.ts}: ${delResp.error}`);
+                }
+                // Slack Tier-3 rate limit: 50 req/min → ~1250ms between requests
+                await new Promise(r => setTimeout(r, 1250));
+              }
+              
+              if (!hist.response_metadata?.next_cursor) break;
+              cursor = hist.response_metadata.next_cursor;
+            }
+            
+            // Write results to file for GitHub Actions to read
+            fs.writeFileSync('/tmp/purge_result.json', JSON.stringify({
+              deleted: totalDeleted,
+              skipped: totalSkipped,
+              channel_id: channelId
+            }));
+            
+            console.log(`✅ Purge complete — deleted ${totalDeleted}, skipped ${totalSkipped}`);
+          }
+          
+          purge().catch(err => {
+            console.error('Fatal:', err.message);
+            process.exit(1);
+          });
+          EOF
+
+      - name: Post result to Slack
+        if: always()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          if [ -f /tmp/purge_result.json ]; then
+            RESULT=$(cat /tmp/purge_result.json)
+            DELETED=$(echo $RESULT | jq -r '.deleted')
+            SKIPPED=$(echo $RESULT | jq -r '.skipped')
+            CHANNEL_ID=$(echo $RESULT | jq -r '.channel_id')
+            
+            MSG="🗑️ *Purge complete* — deleted *$DELETED* message(s), skipped *$SKIPPED*"
+            
+            curl -X POST https://slack.com/api/chat.postMessage \
+              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"channel\": \"$CHANNEL_ID\", \"text\": \"$MSG\"}"
+          fi

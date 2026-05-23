@@ -1,0 +1,37 @@
+name = "email-manager-worker"
+main = "worker/index.js"
+compatibility_date = "2024-09-23"
+
+# ── KV namespace for token cache + rate-limit counters ───────────────────────────────────
+# Create with: wrangler kv namespace create EMAIL_KV
+# Then paste the returned id below.
+[[kv_namespaces]]
+binding  = "EMAIL_KV"
+id       = "a1918c03db2f495181de3e0c9ead8bb6"
+
+# (No cron triggers — scheduled email checks run in GitHub Actions)
+
+
+# ── Non-secret variables ──────────────────────────────────────────────────────────
+[vars]
+# GitHub repo for workflow_dispatch triggers (slash commands → GHA)
+GITHUB_OWNER = "acharyarajasekhar"
+GITHUB_REPO  = "My-Email-Manager-Agent"
+
+# Summariser: "natural" (snippet-based, default) or "cf-ai" (Cloudflare Workers AI)
+SUMMARIZER_ENGINE = "natural"
+
+# Set to "false" to disable slash-command rate limiting (safe for personal/single-user use)
+RATE_LIMIT_ENABLED = "true"
+
+# ── Secrets (set via CLI — never put real values in this file) ──────────────────
+# Run once per secret:
+#   wrangler secret put SLACK_SIGNING_SECRET
+#   wrangler secret put GITHUB_TOKEN        # PAT with `workflow` scope
+#
+# Per account (repeat for N = 1, 2, ...):
+#   wrangler secret put ACCOUNT_1_GMAIL_CLIENT_ID
+#   wrangler secret put ACCOUNT_1_GMAIL_CLIENT_SECRET
+#   wrangler secret put ACCOUNT_1_GMAIL_REFRESH_TOKEN
+#   wrangler secret put ACCOUNT_1_SLACK_WEBHOOK_URL
+#   wrangler secret put ACCOUNT_1_EMAIL
