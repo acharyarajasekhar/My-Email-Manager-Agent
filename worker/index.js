@@ -270,7 +270,7 @@ async function handleSlackAction(rawBody, env) {
       log('action', 'Gmail delete successful', { emailId, accountId });
       // Update the message in Slack to indicate deletion
       if (channelId && messageTs) {
-        await _updateSlackMessage(env.SLACK_BOT_TOKEN, channelId, messageTs, '🗑️ Email moved to trash.');
+        await _updateSlackMessage(env.SLACK_BOT_TOKEN, channelId, messageTs, '🗑️ *Email moved to trash*');
       }
       return jsonResp({ ok: true });
     }
@@ -279,14 +279,14 @@ async function handleSlackAction(rawBody, env) {
       await markAsRead(token, emailId);
       log('action', 'Gmail markAsRead successful', { emailId, accountId });
       if (channelId && messageTs) {
-        await _updateSlackMessage(env.SLACK_BOT_TOKEN, channelId, messageTs, '✅ Marked as read.');
+        await _updateSlackMessage(env.SLACK_BOT_TOKEN, channelId, messageTs, '✅ *Marked as read*');
       }
       return jsonResp({ ok: true });
     }
     if (actionId.startsWith('clear_gmail_')) {
       log('action', 'Dismiss — no Gmail call needed', { emailId, accountId });
       if (channelId && messageTs) {
-        await _updateSlackMessage(env.SLACK_BOT_TOKEN, channelId, messageTs, '✕ Dismissed.');
+        await _updateSlackMessage(env.SLACK_BOT_TOKEN, channelId, messageTs, '✕ *Dismissed*');
       }
       return jsonResp({ ok: true });
     }
@@ -363,22 +363,30 @@ async function handleResetCommand(rawBody, env) {
 
 /** Post a confirmation message for button action. */
 async function _updateSlackMessage(botToken, channelId, messageTs, confirmText) {
-  if (!botToken) return; // Fallback if no bot token
+  if (!botToken || !messageTs) return; // Fallback if no bot token or timestamp
   try {
-    // Post confirmation message in the same channel
-    const postResp = await fetch('https://slack.com/api/chat.postMessage', {
+    // Update the original message in-place
+    const updateResp = await fetch('https://slack.com/api/chat.update', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${botToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel: channelId, text: confirmText }),
+      body: JSON.stringify({ 
+        channel: channelId, 
+        ts: messageTs,
+        text: confirmText,
+        blocks: [{
+          type: 'section',
+          text: { type: 'mrkdwn', text: confirmText }
+        }]
+      }),
     });
-    const postResult = await postResp.json();
-    if (!postResult.ok) {
-      logError('action', 'chat.postMessage failed', new Error(postResult.error), { channelId });
+    const updateResult = await updateResp.json();
+    if (!updateResult.ok) {
+      logError('action', 'chat.update failed', new Error(updateResult.error), { channelId, messageTs });
     } else {
-      log('action', 'Confirmation message posted', { channelId });
+      log('action', 'Message updated', { channelId, messageTs });
     }
   } catch (err) {
-    logError('action', 'Failed to post confirmation', err, { channelId, messageTs });
+    logError('action', 'Failed to update message', err, { channelId, messageTs });
   }
 }
 
