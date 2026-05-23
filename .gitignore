@@ -1,7 +1,6 @@
 # Dependencies
 node_modules/
 yarn.lock
-package-lock.json
 
 # Environment variables - NEVER commit these files
 .env
