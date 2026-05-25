@@ -34,8 +34,18 @@ jobs:
           if [ -n "${{ inputs.account_id }}" ]; then
             MATRIX="[${{ inputs.account_id }}]"
           else
-            MATRIX=$(cat accounts.json | jq -c '.accounts | map(.id)')
+            if [ -f accounts.json ]; then
+              MATRIX=$(cat accounts.json | jq -c '.accounts | map(.id)')
+            else
+              MATRIX="[]"
+            fi
           fi
+          
+          # Ensure MATRIX is valid JSON
+          if [ -z "$MATRIX" ] || [ "$MATRIX" = "null" ]; then
+            MATRIX="[]"
+          fi
+          
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
           echo "Accounts to process: $MATRIX"
 
