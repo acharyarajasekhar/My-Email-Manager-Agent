@@ -35,15 +35,15 @@ jobs:
             MATRIX="[${{ inputs.account_id }}]"
           else
             if [ -f accounts.json ]; then
-              MATRIX=$(cat accounts.json | jq -c '.accounts | map(.id)')
+              MATRIX=$(cat accounts.json | jq -c '.accounts | map(.id) // []')
+              if [ -z "$MATRIX" ] || [ "$MATRIX" = "null" ]; then
+                echo "Warning: accounts.json exists but contains no accounts"
+                MATRIX="[]"
+              fi
             else
+              echo "Warning: accounts.json not found; no accounts to process"
               MATRIX="[]"
             fi
-          fi
-          
-          # Ensure MATRIX is valid JSON
-          if [ -z "$MATRIX" ] || [ "$MATRIX" = "null" ]; then
-            MATRIX="[]"
           fi
           
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
@@ -58,6 +58,8 @@ jobs:
       contents: write
     # Each account runs independently; one failure does NOT block others
     continue-on-error: true
+    # Skip this job if there are no accounts to process
+    if: needs.prepare.outputs.matrix != '[]'
     strategy:
       matrix:
         account: ${{ fromJson(needs.prepare.outputs.matrix) }}

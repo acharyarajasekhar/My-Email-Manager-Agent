@@ -9,9 +9,6 @@ yarn.lock
 .env.development
 .env.production
 
-# Configuration files with account IDs
-accounts.json
-
 # State/Cache files
 .cache/
 *.log
